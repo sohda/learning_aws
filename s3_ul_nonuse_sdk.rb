@@ -7,29 +7,43 @@ require 'uri'
 
 Net::HTTP.version_1_2
 
+AWS_PORT = 443
+S3_END_POINT = 's3-ap-northeast-1.amazonaws.com'
 BUKET_NAME = 'bucket_name'
-BUCKET_PATH = '/'
+OBJECT_PATH = '/object_path'
 ACCESS_KEY_ID = 'access_key_id'
 SECRET_ACCESS_KEY = 'secret_access_key_id'
-DATE = Time.now.rfc2822
+DATE = Time.now.rfc822
 
-def aws_sign(secret_access_key_id, date, bucket, path)
-  string_to_sign = "GET\n\n\n#{date}\n/#{bucket}#{path}"
-  digest = OpenSSL::HMAC.digest(OpenSSL::Digest::SHA1.new, secret_access_key_id, string_to_sign)
-  Base64.encode64(digest).strip
+def authorized_header(header, object_path)
+  signature = signature(SECRET_ACCESS_KEY, string_to_sign(header['date'], object_path))
+  header['authorization'] = "AWS #{ACCESS_KEY_ID}:#{URI.escape(signature)}"
+  header
 end
 
-signature = aws_sign(SECRET_ACCESS_KEY, DATE, BUKET_NAME, BUCKET_PATH)
-signature = URI.escape(signature)
-header = {
-    'Host' => 's3.amazonaws.com',
-    'Date' => DATE,
-    'Authorization' => "AWS #{ACCESS_KEY_ID}:#{signature}"}
+def string_to_sign(date, path)
+  [ 'PUT',
+    "\ntext/plain",
+    date,
+    "x-amz-acl:private\nx-amz-storage-class:REDUCED_REDUNDANCY",
+    "/#{BUKET_NAME}#{path}" ].join("\n")
+end
+
+def signature(secret, string_to_sign)
+  hmac_digest = OpenSSL::HMAC.digest(OpenSSL::Digest::SHA1.new, secret, string_to_sign)
+  Base64.encode64(hmac_digest).strip
+end
+
+header = { 'content-type'        => 'text/plain',
+           'date'                => Time.now.rfc822,
+           'x-amz-acl'           => 'private',
+           'x-amz-storage-class' => 'REDUCED_REDUNDANCY' }
 
 content = nil
-Net::HTTP.start(BUKET_NAME + '.' + header['Host']) do |http|
-  content = http.get("/", header)
-end
+https = Net::HTTP.new("#{BUKET_NAME}.#{S3_END_POINT}", AWS_PORT)
+https.use_ssl = true
+data = "this is a sample code ;)"
+response = https.put(OBJECT_PATH, data, authorized_header(header, OBJECT_PATH))
 
-# for debug
-content.body
+## for debug
+puts "response code:  #{response.code} "
